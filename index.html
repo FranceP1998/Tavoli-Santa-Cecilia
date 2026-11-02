@@ -24,7 +24,7 @@ aside{width:260px;background:var(--card);border-right:1px solid var(--line);disp
 .ptitle{font:600 22px var(--ti);margin:0 0 24px;text-align:center}
 #canvas{position:relative}
 .lot{position:absolute;display:flex;align-items:center;justify-content:center;height:40px;border:2px solid var(--ink);border-radius:8px;background:#fff;font:600 21px var(--ti);letter-spacing:.04em}
-.g.gone{color:var(--bad);border-color:#e3b3af}.seat.gone span{color:var(--bad)}
+.g.gone{color:var(--bad);border:2px solid var(--bad)}.seat.full.gone{background:#d93025;border:2px solid #8c1d18}.seat.full.gone span,.seat.full.gone .x{color:#fff}
 .tbl{position:absolute;width:370px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px}
 .th{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
 .th strong{font:600 16px var(--ti)}.cnt{color:var(--mut);font:11px var(--sys)}
@@ -56,7 +56,7 @@ body.pm #list{width:690px;border:0;padding:0;border-radius:0}
 @media print{
  header,aside,.ctl,#toast,.x{display:none!important}
  body{display:block;height:auto;background:#fff}main{display:block}#stage{overflow:visible;padding:0}
- #list{border:0;padding:0}.tbl,.lot{border-color:#444}.seat,.seat.full{border-color:#555;background:#fff!important}.bar{background:#eee;border-color:#999}
+ #list{border:0;padding:0}.tbl,.lot{border-color:#444}.seat,.seat.full{border-color:#555;background:#fff!important}.seat.full.gone{border:1px solid #555!important}.seat.full.gone span{color:#000!important}.bar{background:#eee;border-color:#999}
 }
 </style></head><body>
 <header>
@@ -115,7 +115,7 @@ function render(){
  $('#canvas').innerHTML='<div class="lot">Lotteria</div>'+S.tables.map((t,i)=>{let L='',Rr='';for(let k=0;k<t.rows;k++){L+=seat(`${t.id}-L${k}`);Rr+=seat(`${t.id}-R${k}`)}
   const n=seatIds(t),fl=n.filter(s=>S.seats[s]).length;
   return `<div class="tbl" data-t="${t.id}" style="left:${t.x}px;top:${t.y}px"><div class="th"><strong>Tavolo ${i+1}</strong><span class="cnt">${fl} / ${n.length} posti</span></div>
-  <div class="ctl"><button data-a="r-">− fila</button><button data-a="r+">+ fila</button><label><input type="checkbox" data-a="ht" ${t.ht?'checked':''}>capotavola sopra</label><label><input type="checkbox" data-a="hb" ${t.hb?'checked':''}>sotto</label><button data-a="del">Elimina</button></div>
+  <div class="ctl"><button data-a="r-">− fila</button><button data-a="r+">+ fila</button><label><input type="checkbox" data-a="ht" ${t.ht?'checked':''}>capotavola sopra</label><label><input type="checkbox" data-a="hb" ${t.hb?'checked':''}>sotto</label><button data-a="clr">Svuota tavolo</button><button data-a="del">Elimina</button></div>
   ${t.ht?seat(t.id+'-T','head'):''}<div class="tb"><div>${L}</div><div class="bar"></div><div>${Rr}</div></div>${t.hb?seat(t.id+'-B','head b'):''}</div>`}).join('');
  fit();
  // elenco alfabetico: una riga per ogni tavolo
@@ -188,6 +188,8 @@ document.addEventListener('click',e=>{
  const x=e.target.closest('[data-x]');if(x){push();delete S.seats[x.dataset.x];save();return render()}
  const a=e.target.closest('[data-a]');if(!a||a.type=='checkbox')return;const t=S.tables.find(t=>t.id==a.closest('.tbl').dataset.t);
  if(a.dataset.a=='del'){if(!confirm('Eliminare questo tavolo? I nomi tornano nella lista da assegnare e i tavoli successivi cambiano numero.'))return;push();S.tables=S.tables.filter(y=>y!=t)}
+ else if(a.dataset.a=='clr'){const ids=seatIds(t).filter(z=>S.seats[z]);if(!ids.length)return toast('Il tavolo è già vuoto.');
+  if(!confirm(`Togliere tutti i nomi dal tavolo ${S.tables.indexOf(t)+1} (${ids.length} persone)? I posti restano.`))return;push();ids.forEach(z=>delete S.seats[z])}
  else{push();t.rows=Math.max(1,Math.min(30,t.rows+(a.dataset.a=='r+'?1:-1)))}save();render()});
 document.addEventListener('change',e=>{const a=e.target.closest('input[data-a]');if(!a)return;const t=S.tables.find(t=>t.id==a.closest('.tbl').dataset.t);push();t[a.dataset.a]=a.checked;save();render()});
 // trascinamento nomi
