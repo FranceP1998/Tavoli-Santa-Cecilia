@@ -61,19 +61,20 @@ body.pm #list{width:690px;border:0;padding:0;border-radius:0}
 </style></head><body>
 <header>
  <h1>Piano tavoli · Santa Cecilia</h1>
- <button id="bImp" class="pri">Importa invitati (CSV)</button>
- <button id="bAdd">Aggiungi tavolo</button><button id="bSync">Collega Google Fogli</button>
+ <button id="bAdd">Aggiungi tavolo</button>
  <button id="bUndo">Annulla</button>
  <span class="tabs"><button data-v="plan" class="on">Pianta</button> <button data-v="list">Elenco alfabetico</button></span>
  <label id="colsL" hidden>Colonne <select id="cols"><option>2</option><option selected>3</option><option>4</option></select></label>
  <span style="flex:1"></span>
  <button id="bSave">Salva file</button><button id="bCsv">Esporta CSV segnaposto</button><button id="bOpen">Apri file</button><button id="bPrint" class="pri">Stampa</button>
- <input type="file" id="fCsv" accept=".csv,.tsv,.txt" hidden><input type="file" id="fJson" accept=".json" hidden>
+ <input type="file" id="fJson" accept=".json" hidden>
 </header>
 <main>
  <aside><div class="ah"><div id="cnt"></div><input type="search" id="q" placeholder="Cerca un nome">
   <select id="filt"><option value="todo">Da assegnare</option><option value="all">Tutti gli invitati</option></select>
   <div style="display:flex;gap:6px;align-items:center"><div id="sync" class="mut" style="flex:1"></div><button id="bRef" hidden>Aggiorna ora</button></div>
+  <div id="pstat" class="mut"></div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap"><button id="bSaveNow" hidden>Salva ora</button><button id="bLoadRemote" hidden>Carica dal foglio</button><button id="bForce" hidden>Sovrascrivi con il mio</button><button id="bVer" hidden>Versioni salvate</button></div>
 </div>
   <div id="gl"></div></aside>
  <section id="stage">
@@ -81,6 +82,7 @@ body.pm #list{width:690px;border:0;padding:0;border-radius:0}
   <div id="list" hidden><h2 class="ptitle">Pranzo di Santa Cecilia 2026 - Elenco Alfabetico</h2><div id="lcols"></div></div>
  </section>
 </main>
+<dialog id="dh"><form method="dialog"><h3 style="margin:0 0 8px;font:600 18px var(--ti)">Versioni salvate</h3><div id="dhl" style="max-height:50vh;overflow:auto;min-width:300px"></div><menu><button value="x">Chiudi</button></menu></form></dialog>
 <div id="toast" hidden></div>
 <script>
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
@@ -92,7 +94,7 @@ function fresh(){const s={guests:[],tables:[],seats:{},next:1};for(let i=0;i<6;i
 function load(){try{const s=JSON.parse(localStorage.getItem('pianoTavoli'));return s&&s.tables?s:null}catch(e){return null}}
 let S=load()||fresh(),hist=[],view='plan',R={},rows0=[];
 S.guests.forEach(g=>{g.l??=((g.c||'')+' '+(g.n||'')).trim()});S.guests=S.guests.filter(g=>!g.m);delete S.del;
-const save=()=>{try{localStorage.setItem('pianoTavoli',JSON.stringify(S))}catch(e){}};
+const save=noRemote=>{try{localStorage.setItem('pianoTavoli',JSON.stringify(S))}catch(e){}if(!noRemote)schedRemote()};
 const push=()=>{hist.push(JSON.stringify(S));if(hist.length>60)hist.shift()};
 const seatIds=t=>{const a=[];if(t.ht)a.push(t.id+'-T');for(let i=0;i<t.rows;i++)a.push(t.id+'-L'+i,t.id+'-R'+i);if(t.hb)a.push(t.id+'-B');return a};
 const cmp=(a,b)=>a.l.localeCompare(b.l,'it');
@@ -110,7 +112,7 @@ function render(){
  const f=$('#filt').value,q=norm($('#q').value);
  const a=[...S.guests].sort(cmp).filter(g=>(f=='all'||!where[g.id])&&(!q||norm(g.l).includes(q)));
  $('#gl').innerHTML=a.map(g=>`<div class="g ${where[g.id]?'done':''} ${g.gone?'gone':''}" draggable="true" data-g="${esc(g.id)}">${esc(nm[g.id])}<span>${where[g.id]?`<small>Tavolo ${where[g.id]}</small>`:''}</span></div>`).join('')
-  ||`<p class="mut">${tot?(f=='todo'?'Tutti gli invitati hanno un posto.':'Nessun risultato.'):'Importa il CSV degli invitati per iniziare.'}</p>`;
+  ||`<p class="mut">${tot?(f=='todo'?'Tutti gli invitati hanno un posto.':'Nessun risultato.'):'Sto aspettando l’elenco dal foglio delle prenotazioni…'}</p>`;
  const seat=(id,cl='')=>{const g=S.seats[id];return `<div class="seat ${cl} ${g?'full':''} ${g&&by[g]&&by[g].gone?'gone':''}" data-s="${id}" ${g?'draggable="true"':''}><span ${g?`data-full="${esc(nm[g])}"`:''}>${g?esc(nm[g]):''}</span>${g?`<i class="x" data-x="${id}" title="Togli dal posto">×</i>`:''}</div>`};
  $('#canvas').innerHTML='<div class="lot">Lotteria</div>'+S.tables.map((t,i)=>{let L='',Rr='';for(let k=0;k<t.rows;k++){L+=seat(`${t.id}-L${k}`);Rr+=seat(`${t.id}-R${k}`)}
   const n=seatIds(t),fl=n.filter(s=>S.seats[s]).length;
@@ -146,27 +148,17 @@ function fit(){if(view!='plan')return;
   t.x=o+c*(TW+GAP);t.y=y;e.style.left=t.x+'px';e.style.top=y+'px';h=Math.max(h,e.offsetHeight)});
  $('#canvas').style.height=(y+h+(pm?0:20))+'px'}
 // CSV
-function parseCSV(t){t=t.replace(/^\uFEFF/,'');const f=t.split(/\r?\n/)[0],d=[';','\t',','].map(c=>[c,f.split(c).length]).sort((a,b)=>b[1]-a[1])[0][0];
- const r=[];let row=[],c='',q=false;
- for(let i=0;i<t.length;i++){const ch=t[i];
-  if(q){if(ch=='"'){if(t[i+1]=='"'){c+='"';i++}else q=false}else c+=ch}
-  else if(ch=='"')q=true;else if(ch==d){row.push(c);c=''}
-  else if(ch=='\n'||ch=='\r'){if(ch=='\r'&&t[i+1]=='\n')i++;row.push(c);r.push(row);row=[];c=''}else c+=ch}
- if(c||row.length){row.push(c);r.push(row)}return r.filter(x=>x.some(y=>y.trim()))}
 function buildGuests(rows){const seen={},out=[];
  rows.forEach(r=>{const l=(r[0]||'').trim().replace(/\s+/g,' ');if(!l)return;const b=norm(l);seen[b]=(seen[b]||0)+1;out.push({id:b+'|'+seen[b],l})});return out}
-$('#bImp').onclick=()=>$('#fCsv').click();
 function mergeList(g,src){const cur=new Map(S.guests.map(x=>[x.id,x])),nw=new Set(g.map(x=>x.id)),seated=new Set(Object.values(S.seats));
  const add=g.filter(x=>!cur.has(x.id)),back=g.filter(x=>cur.get(x.id)?.gone),
   gone=S.guests.filter(x=>!nw.has(x.id)&&!x.gone&&seated.has(x.id)),lost=S.guests.filter(x=>!nw.has(x.id)&&!seated.has(x.id));
  if(!add.length&&!back.length&&!gone.length&&!lost.length)return null;
  push();const first=!S.guests.length;
  S.guests=[...g.map(x=>({id:x.id,l:x.l})),...S.guests.filter(x=>!nw.has(x.id)&&seated.has(x.id)).map(x=>({id:x.id,l:x.l,gone:1}))];
- save();render();const nm=x=>tc(x.l);
+ save(1);render();const nm=x=>tc(x.l);
  if(first)return `${g.length} invitati caricati (${src}).`;
  return `${src}: ${add.length} nuovi, ${lost.length} tolti`+(lost.length?' ('+lost.map(nm).join(', ')+')':'')+'.'+(gone.length?` Attenzione: ${gone.map(nm).join(', ')} non c’è più nel foglio ma ha un posto: è segnato in rosso, toglilo dal posto con la × quando vuoi.`:'')}
-$('#fCsv').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;const g=buildGuests(parseCSV(await f.text()));
- if(!g.length)return toast('Non ho trovato nomi nel file.');toast(mergeList(g,'CSV')||'Nessuna differenza con l’elenco già caricato.')};
 // azioni
 $('#bAdd').onclick=()=>{push();S.tables.push(newT(S,S.tables.length));save();render()};
 $('#bUndo').onclick=undo;function undo(){if(!hist.length)return toast('Niente da annullare.');S=JSON.parse(hist.pop());save();render()}
@@ -175,9 +167,10 @@ $('#q').oninput=$('#filt').onchange=$('#cols').onchange=render;
 $$('.tabs button').forEach(b=>b.onclick=()=>{view=b.dataset.v;$$('.tabs button').forEach(x=>x.classList.toggle('on',x==b));$('#plan').hidden=view!='plan';$('#list').hidden=view!='list';$('#colsL').hidden=view!='list';render()});
 $('#bPrint').onclick=()=>{if(window.self!==window.top)toast('Sei in un’anteprima, dove la stampa è bloccata: scarica il file e aprilo con il browser.');try{window.print()}catch(e){toast('Stampa non riuscita: prova con Ctrl+P (o Cmd+P).')}};
 $('#bSave').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'}));a.download='piano-tavoli.json';a.click()};
-// esporta per la stampa unione dei segnaposto: Nome, Tavolo; in ordine di tavolo e, dentro il tavolo, alfabetico
+// esporta per la stampa unione dei segnaposto: Nome, Tavolo; in ordine di tavolo e, dentro il tavolo, nell'ordine dei posti: capotavola in alto, lato sinistro dall'alto in basso, capotavola in basso, lato destro dal basso in alto
 $('#bCsv').onclick=()=>{const nm=names(),rows=[];
- S.tables.forEach((t,i)=>seatIds(t).map(z=>S.seats[z]).filter(Boolean).map(id=>nm[id]).sort((a,b)=>a.localeCompare(b,'it')).forEach(n=>rows.push([n,i+1])));
+ const ord=t=>{const a=[];if(t.ht)a.push(t.id+'-T');for(let k=0;k<t.rows;k++)a.push(t.id+'-L'+k);if(t.hb)a.push(t.id+'-B');for(let k=t.rows-1;k>=0;k--)a.push(t.id+'-R'+k);return a};
+ S.tables.forEach((t,i)=>ord(t).map(z=>S.seats[z]).filter(Boolean).map(id=>nm[id]).forEach(n=>rows.push([n,i+1])));
  if(!rows.length)return toast('Nessun invitato ha ancora un posto.');
  const q=v=>/[",\n]/.test(v)?'"'+String(v).replace(/"/g,'""')+'"':v,free=S.guests.length-rows.length;
  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\uFEFFNome,Tavolo\r\n'+rows.map(r=>r.map(q).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}));a.download='segnaposto-tavoli.csv';a.click();
@@ -219,8 +212,8 @@ function pmOff(){document.body.classList.remove('pm');['--sh','--ws'].forEach(k=
 addEventListener('beforeprint',pmOn);addEventListener('afterprint',pmOff);
 if(document.fonts)document.fonts.addEventListener('loadingdone',()=>render());
 // collegamento al Google Fogli delle prenotazioni (script Apps Script): la pagina lo rilegge ogni 20 secondi e quando la riapri
-let SYNC='',syncing=false,dragging=false;
-try{SYNC=localStorage.getItem('pianoTavoliSync')||''}catch(e){}
+const LINK='https://script.google.com/macros/s/AKfycbxR3qZsEK_feZu8gf30OSHsP8gqNtvDF8w4ah08E4YXMtPA_V7fjwKcbZjxvPtJNaWb/exec?key=cmgv1875';
+let SYNC=LINK,syncing=false,dragging=false;
 function syncMsg(t,bad){const x=$('#sync');x.textContent=t;x.className=bad?'bad':'mut'}
 async function doSync(manual){if(!SYNC||syncing||document.body.classList.contains('pm')||(dragging&&!manual))return;syncing=true;
  try{const j=await(await fetch(SYNC,{cache:'no-store'})).json();if(!j.ok)throw new Error(j.error);
@@ -230,15 +223,53 @@ async function doSync(manual){if(!SYNC||syncing||document.body.classList.contain
   else{const m=mergeList(g,'Dal foglio');if(m)toast(m);syncMsg('Foglio collegato · aggiornato alle '+new Date().toLocaleTimeString('it',{hour:'2-digit',minute:'2-digit',second:'2-digit'}))}}
  catch(e){syncMsg('Non riesco a leggere il foglio: controlla la connessione e il link.',1)}
  syncing=false}
-$('#bSync').onclick=()=>{const v=prompt('Incolla il link dello script del foglio (finisce con /exec?key=…).\nLascia vuoto per scollegare.',SYNC);if(v===null)return;
- if(v.trim()&&!/^https:\/\/script\.google\.com\//.test(v.trim()))return toast('Questo non sembra il link dello script (deve iniziare con https://script.google.com/).');
- SYNC=v.trim();try{localStorage.setItem('pianoTavoliSync',SYNC)}catch(e){}
- $('#bRef').hidden=!SYNC;$('#bImp').hidden=!!SYNC;if(SYNC){syncMsg('Collegamento in corso…');doSync(true)}else syncMsg('Foglio Google non collegato.')};
 $('#bRef').onclick=()=>doSync(true);
-setInterval(()=>{if(document.visibilityState=='visible')doSync()},20000);
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState=='visible')doSync()});
+setInterval(()=>{if(document.visibilityState=='visible')pullPlan().then(()=>doSync())},20000);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState=='visible')pullPlan().then(()=>doSync())});
 document.addEventListener('dragstart',e=>{if(e.target.closest&&e.target.closest('[data-g],.seat.full'))dragging=true});
 document.addEventListener('dragend',()=>dragging=false);document.addEventListener('drop',()=>dragging=false);
-$('#bRef').hidden=!SYNC;$('#bImp').hidden=!!SYNC;syncMsg(SYNC?'Collegamento al foglio in corso…':'Foglio Google non collegato.');
-render();if(SYNC)doSync(true);
+$('#bRef').hidden=false;syncMsg('Collegamento al foglio in corso…');
+
+// salvataggio condiviso del piano sul Google Fogli (stesso script dell'elenco): automatico dopo ogni modifica, con controllo di versione
+var PREV=0,dirty=false,remoteRev=0,conflict=false,saving=false,pulling=false,rt=null,chg=0;
+try{const m=JSON.parse(localStorage.getItem('pianoTavoliMeta'));if(m){PREV=m.rev||0;dirty=!!m.dirty}}catch(e){}
+const meta=()=>{try{localStorage.setItem('pianoTavoliMeta',JSON.stringify({rev:PREV,dirty}))}catch(e){}};
+const hh=at=>new Date(at||Date.now()).toLocaleTimeString('it',{hour:'2-digit',minute:'2-digit'});
+function planMsg(t,bad){$('#pstat').textContent=t||'';$('#pstat').className=bad?'bad':'mut';
+ $('#bSaveNow').hidden=!SYNC||conflict;$('#bLoadRemote').hidden=$('#bForce').hidden=!conflict;$('#bVer').hidden=!SYNC}
+function schedRemote(){if(!SYNC)return;dirty=true;chg++;meta();clearTimeout(rt);
+ if(conflict)return;planMsg('Modifiche non ancora salvate…');rt=setTimeout(()=>pushPlan(),3000)}
+async function pushPlan(force){if(!SYNC)return;clearTimeout(rt);if(saving){rt=setTimeout(()=>pushPlan(force),1500);return}
+ saving=true;const c=chg;
+ try{const j=await(await fetch(SYNC,{method:'POST',body:JSON.stringify({baseRev:force===true?remoteRev:PREV,plan:JSON.stringify(S)})})).json();
+  if(j.ok){PREV=remoteRev=j.rev;conflict=false;if(chg==c){dirty=false;planMsg('Piano salvato sul foglio alle '+hh(j.at))}else rt=setTimeout(()=>pushPlan(),1000);meta()}
+  else if(j.error=='conflict'){remoteRev=j.rev;conflict=true;planMsg('Sul foglio c’è un piano più recente del tuo: non ho salvato. Scegli cosa fare.',1)}
+  else throw new Error(j.error)}
+ catch(e){planMsg('Non riesco a salvare sul foglio ('+(e.message||'errore')+'): riprovo tra poco.',1);rt=setTimeout(()=>pushPlan(),10000)}
+ saving=false}
+function applyPlan(j){try{const x=JSON.parse(j.plan);if(!x.tables||!x.guests)throw 0;push();S=x;PREV=remoteRev=j.rev;dirty=conflict=false;meta();save(1);render();planMsg('Piano caricato dal foglio (salvato alle '+hh(j.at)+').');return true}
+ catch(e){planMsg('Il piano sul foglio non è leggibile.',1);return false}}
+async function pullPlan(manual){if(!SYNC||pulling||saving||document.body.classList.contains('pm')||(dragging&&!manual))return;pulling=true;
+ try{const j=await(await fetch(SYNC+'&action=plan',{cache:'no-store'})).json();if(!j.ok)throw new Error(j.error);
+  if(typeof j.rev!='number')throw new Error('script non aggiornato');
+  remoteRev=j.rev;
+  if(j.rev>PREV){
+   if(!dirty&&!conflict&&(PREV>0||!Object.keys(S.seats).length)&&j.plan){if(applyPlan(j))toast('Piano aggiornato dal foglio (salvato alle '+hh(j.at)+').')}
+   else{conflict=true;planMsg('Sul foglio c’è un piano più recente del tuo. Scegli cosa fare.',1)}}
+  else if(j.rev==0&&Object.keys(S.seats).length&&!dirty)schedRemote();
+  else if(!dirty&&!conflict)planMsg(j.rev?'Piano allineato con il foglio (salvato alle '+hh(j.at)+').':'Nessun piano ancora salvato sul foglio.')}
+ catch(e){planMsg('Non riesco a leggere il piano dal foglio ('+(e.message||'errore')+'). Se hai appena aggiornato lo script, serve una nuova distribuzione.',1)}
+ pulling=false}
+$('#bSaveNow').onclick=()=>{if(!dirty)return toast('Il piano è già salvato sul foglio.');pushPlan()};
+$('#bForce').onclick=()=>{if(confirm('Sovrascrivere il piano salvato sul foglio con il tuo? Quello attuale resta comunque nello storico.')){conflict=false;pushPlan(true)}};
+$('#bLoadRemote').onclick=async()=>{if(!confirm('Caricare il piano dal foglio al posto del tuo? Le tue modifiche non salvate andranno perse.'))return;
+ try{const j=await(await fetch(SYNC+'&action=plan',{cache:'no-store'})).json();if(!j.ok||!j.plan)throw 0;applyPlan(j)}catch(e){toast('Non riesco a leggere il piano dal foglio.')}};
+$('#bVer').onclick=async()=>{try{const j=await(await fetch(SYNC+'&action=history',{cache:'no-store'})).json();if(!j.ok||!j.versions)throw 0;
+ $('#dhl').innerHTML=j.versions.length?j.versions.map(v=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:4px 0"><span class="mut">Versione ${v.rev} · ${new Date(v.at).toLocaleString('it',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span><button data-rev="${v.rev}">Ripristina</button></div>`).join(''):'<p class="mut">Nessuna versione salvata.</p>';
+ $('#dh').showModal()}catch(e){toast('Non riesco a leggere le versioni: serve lo script aggiornato.')}};
+$('#dhl').onclick=async e=>{const b=e.target.closest('[data-rev]');if(!b)return;
+ if(!confirm('Ripristinare la versione '+b.dataset.rev+'? Il piano attuale viene sostituito (resta comunque nello storico).'))return;
+ try{const j=await(await fetch(SYNC+'&action=plan&rev='+b.dataset.rev,{cache:'no-store'})).json();if(!j.ok||!j.plan)throw 0;
+  const x=JSON.parse(j.plan);push();S=x;dirty=true;conflict=false;chg++;meta();save(1);render();$('#dh').close();pushPlan(true)}catch(x){toast('Ripristino non riuscito.')}};
+planMsg('');render();if(SYNC){pullPlan(true).then(()=>{doSync(true);if(dirty)schedRemote()})}
 </script></body></html>
