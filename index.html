@@ -44,11 +44,17 @@ aside{width:260px;background:var(--card);border-right:1px solid var(--line);disp
 #toast{font:12.5px/1.4 var(--sys);position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 14px;border-radius:8px;max-width:80vw}
 dialog{border:1px solid var(--line);border-radius:10px;padding:18px;min-width:340px}dialog label{display:block;margin:8px 0}dialog select{width:100%}
 menu{display:flex;gap:8px;justify-content:flex-end;padding:0;margin:14px 0 0}
-.lotf{display:flex;align-items:center;justify-content:center;height:40px;border:2px solid var(--ink);border-radius:8px;background:#fff;font:600 19px var(--ti);letter-spacing:.04em;margin-bottom:12px}
+.lotf{display:flex;align-items:center;justify-content:center;height:40px;border:2px solid var(--ink);border-radius:8px;background:#fff;font:600 19px var(--ti);letter-spacing:.04em;margin-bottom:12px;width:calc(2*(100% - 20px)/3 + 10px)}
 .ovg{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;align-items:stretch}
 .tile{display:flex;align-items:center;justify-content:center;text-align:center;border:2px solid #8a8a8a;border-radius:8px;background:#fff;font:600 15px var(--ti);cursor:pointer;padding:4px}
 .tile:active{background:var(--ye)}.tile.gone{background:var(--bad);color:#fff;border-color:var(--or)}
 .nav{display:flex;gap:6px;margin-bottom:10px}.nav button{flex:1}.nav button:disabled{opacity:.35}
+.seat.ms{outline:3px solid var(--or);outline-offset:-1px}.seat.ms:not(.gone){background:var(--ye)}
+#mq{position:fixed;border:1px dashed var(--navy);background:rgba(239,113,53,.15);pointer-events:none;z-index:50}
+#mbar{position:fixed;bottom:56px;left:50%;transform:translateX(-50%);display:flex;gap:6px;align-items:center;background:var(--navy);color:#fff;padding:8px 10px;border-radius:10px;z-index:40;font:12.5px var(--sys);white-space:nowrap}
+#mbar button{padding:5px 9px}#stage{user-select:none;-webkit-user-select:none}
+.hintpc{display:none}@media(hover:hover){.hintpc{display:block}}
+.seat.lift{opacity:.35}.seat.dst{outline:3px dashed var(--navy);outline-offset:-2px;background:var(--sk)!important}.seat.dstbad{outline:3px solid var(--bad);outline-offset:-2px}
 .hint{display:none}
 @media(hover:none){.hint{display:block}}
 @media(max-width:760px){
@@ -68,7 +74,7 @@ body.pm .seat{padding:0 4px}body.pm .seat span{font-size:13px}
 body.pm .head{width:150px}
 body.pm #list{width:690px;border:0;padding:0;border-radius:0}
 @media print{
- header,aside,.ctl,#toast,.x{display:none!important}
+ header,aside,.ctl,#toast,.x,#mbar,#mq,.nav{display:none!important}
  body{display:block;height:auto;background:#fff}main{display:block}#stage{overflow:visible;padding:0}
  #list{border:0;padding:0}.tbl,.lot{border-color:#444}.seat,.seat.full{border-color:#555;background:#fff!important}.seat.full.gone{border:1px solid #555!important}.seat.full.gone span{color:#000!important}.bar{background:#eee;border-color:#999}
 }
@@ -89,6 +95,8 @@ body.pm #list{width:690px;border:0;padding:0;border-radius:0}
   <select id="filt"><option value="todo">Da assegnare</option><option value="all">Tutti gli invitati</option></select>
   <div style="display:flex;gap:6px;align-items:center"><div id="sync" class="mut" style="flex:1"></div><button id="bRef" hidden>Aggiorna ora</button></div>
   <div id="pstat" class="mut"></div>
+  <button id="bMulti">Selezione multipla: no</button>
+  <div class="hintpc mut">Trascina un rettangolo sui nomi per sceglierne più di uno, poi trascinali sul nuovo posto (o usa ▲ ▼). Ctrl+clic aggiunge o toglie un nome; Maiusc+clic seleziona tutti i nomi in mezzo.</div>
   <div class="hint mut">Tocca un nome della lista, poi il posto dove metterlo. Tocca un posto occupato per spostarlo.</div>
   <div style="display:flex;gap:6px;flex-wrap:wrap"><button id="bSaveNow" hidden>Salva ora</button><button id="bLoadRemote" hidden>Carica dal foglio</button><button id="bForce" hidden>Sovrascrivi con il mio</button><button id="bVer" hidden>Versioni salvate</button></div>
 </div>
@@ -99,6 +107,7 @@ body.pm #list{width:690px;border:0;padding:0;border-radius:0}
  </section>
 </main>
 <dialog id="dh"><form method="dialog"><h3 style="margin:0 0 8px;font:600 18px var(--ti)">Versioni salvate</h3><div id="dhl" style="max-height:50vh;overflow:auto;min-width:300px"></div><menu><button value="x">Chiudi</button></menu></form></dialog>
+<div id="mbar" hidden><span id="mcount"></span><button id="mUp">▲ Su</button><button id="mDn">▼ Giù</button><button id="mClr">Deseleziona</button></div>
 <div id="toast" hidden></div>
 <script>
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
@@ -110,19 +119,21 @@ function fresh(){const s={guests:[],tables:[],seats:{},next:1};for(let i=0;i<6;i
 function load(){try{const s=JSON.parse(localStorage.getItem('pianoTavoli'));return s&&s.tables?s:null}catch(e){return null}}
 let S=load()||fresh(),hist=[],view='plan',R={},rows0=[];
 S.guests.forEach(g=>{g.l??=((g.c||'')+' '+(g.n||'')).trim()});S.guests=S.guests.filter(g=>!g.m);delete S.del;
-let sel=null,mview=null;
+let sel=null,mview=null,msel=[],multi=false,mqj=false,anchor=null,dragBlock=null,lastPrev=null;
 const save=noRemote=>{try{localStorage.setItem('pianoTavoli',JSON.stringify(S))}catch(e){}if(!noRemote)schedRemote()};
 const push=()=>{hist.push(JSON.stringify(S));if(hist.length>60)hist.shift()};
 const seatIds=t=>{const a=[];if(t.ht)a.push(t.id+'-T');for(let i=0;i<t.rows;i++)a.push(t.id+'-L'+i,t.id+'-R'+i);if(t.hb)a.push(t.id+'-B');return a};
 const cmp=(a,b)=>a.l.localeCompare(b.l,'it');
 function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>t.hidden=true,6000)}
+// ordine dei posti di un tavolo: capotavola in alto, lato sinistro dall'alto in basso, capotavola in basso, lato destro dal basso in alto
+const ord=t=>{const a=[];if(t.ht)a.push(t.id+'-T');for(let k=0;k<t.rows;k++)a.push(t.id+'-L'+k);if(t.hb)a.push(t.id+'-B');for(let k=t.rows-1;k>=0;k--)a.push(t.id+'-R'+k);return a};
 function clean(){const ok=new Set(S.tables.flatMap(seatIds)),ids=new Set(S.guests.map(g=>g.id)),used=new Set();
  for(const s in S.seats){const g=S.seats[s];if(!ok.has(s)||!ids.has(g)||used.has(g))delete S.seats[s];else used.add(g)}
  S.guests=S.guests.filter(g=>!g.gone||used.has(g.id))}
 const tc=x=>x.toLowerCase().replace(/(^|[\s'’\-])(\p{L})/gu,(m,a,b)=>a+b.toUpperCase());
 const names=()=>{const m={};S.guests.forEach(g=>m[g.id]=tc(g.l));return m};
 function render(){
- clean();const nm=names(),by={},where={};S.guests.forEach(g=>by[g.id]=g);
+ clean();msel=msel.filter(z=>S.seats[z]);const nm=names(),by={},where={};S.guests.forEach(g=>by[g.id]=g);
  S.tables.forEach((t,i)=>seatIds(t).forEach(s=>{if(S.seats[s])where[S.seats[s]]=i+1}));R={nm,where};
  const tot=S.guests.length,as=Object.keys(where).length,seats=S.tables.reduce((a,t)=>a+seatIds(t).length,0);
  $('#cnt').innerHTML=`Assegnati <b>${as}</b> su ${tot}<br><span class="${seats<tot?'bad':'mut'}">Posti disponibili: ${seats}</span>`;
@@ -130,12 +141,13 @@ function render(){
  const a=[...S.guests].sort(cmp).filter(g=>(f=='all'||!where[g.id])&&(!q||norm(g.l).includes(q)));
  $('#gl').innerHTML=a.map(g=>`<div class="g ${where[g.id]?'done':''} ${g.gone?'gone':''} ${sel&&sel.t=='g'&&sel.id==g.id?'sel':''}" draggable="true" data-g="${esc(g.id)}">${esc(nm[g.id])}<span>${where[g.id]?`<small>Tavolo ${where[g.id]}</small>`:''}</span></div>`).join('')
   ||`<p class="mut">${tot?(f=='todo'?'Tutti gli invitati hanno un posto.':'Nessun risultato.'):'Sto aspettando l’elenco dal foglio delle prenotazioni…'}</p>`;
- const seat=(id,cl='')=>{const g=S.seats[id];return `<div class="seat ${cl} ${g?'full':''} ${g&&by[g]&&by[g].gone?'gone':''} ${sel&&sel.t=='s'&&sel.id==id?'sel':''}" data-s="${id}" ${g?'draggable="true"':''}><span ${g?`data-full="${esc(nm[g])}"`:''}>${g?esc(nm[g]):''}</span>${g?`<i class="x" data-x="${id}" title="Togli dal posto">×</i>`:''}</div>`};
+ const seat=(id,cl='')=>{const g=S.seats[id];return `<div class="seat ${cl} ${g?'full':''} ${g&&by[g]&&by[g].gone?'gone':''} ${sel&&sel.t=='s'&&sel.id==id?'sel':''} ${msel.includes(id)?'ms':''}" data-s="${id}" ${g?'draggable="true"':''}><span ${g?`data-full="${esc(nm[g])}"`:''}>${g?esc(nm[g]):''}</span>${g?`<i class="x" data-x="${id}" title="Togli dal posto">×</i>`:''}</div>`};
  $('#canvas').innerHTML='<div class="lot">Lotteria</div>'+S.tables.map((t,i)=>{let L='',Rr='';for(let k=0;k<t.rows;k++){L+=seat(`${t.id}-L${k}`);Rr+=seat(`${t.id}-R${k}`)}
   const n=seatIds(t),fl=n.filter(s=>S.seats[s]).length;
   return `<div class="tbl" data-t="${t.id}" style="left:${t.x}px;top:${t.y}px"><div class="th"><strong>Tavolo ${i+1}</strong><span class="cnt">${fl} / ${n.length} posti</span></div>
   <div class="ctl"><button data-a="r-">− fila</button><button data-a="r+">+ fila</button><label><input type="checkbox" data-a="ht" ${t.ht?'checked':''}>capotavola sopra</label><label><input type="checkbox" data-a="hb" ${t.hb?'checked':''}>sotto</label><button data-a="clr">Svuota tavolo</button><button data-a="del">Elimina</button></div>
   ${t.ht?seat(t.id+'-T','head'):''}<div class="tb"><div>${L}</div><div class="bar"></div><div>${Rr}</div></div>${t.hb?seat(t.id+'-B','head b'):''}</div>`}).join('');
+ $('#mbar').hidden=!msel.length;$('#mcount').textContent=msel.length+(msel.length==1?' nome selezionato':' nomi selezionati');$('#bMulti').textContent='Selezione multipla: '+(multi?'sì':'no');$('#bMulti').classList.toggle('pri',multi);
  const mob=innerWidth<760&&!document.body.classList.contains('pm');
  if(mview&&!S.tables.some(t=>t.id==mview))mview=null;
  if(mob&&view=='plan'){
@@ -168,7 +180,7 @@ function fit(){if(view!='plan')return;if($('.ov')){$('#canvas').style.height='';
  $$('.seat.full span').forEach(sp=>{const w=sp.dataset.full.split(' ');sp.textContent=w.join(' ');
   const over=()=>sp.scrollWidth>sp.clientWidth||sp.offsetHeight>lines*1.2*parseFloat(getComputedStyle(sp).fontSize);
   for(let k=w.length-1;k>=1&&over();k--)sp.textContent=w.map((x,i)=>i>=k?x[0]+'.':x).join(' ')});
- const lot=$('.lot'),nav=$('.nav'),LW=COLS*TW+(COLS-1)*GAP;if(lot){lot.style.width=LW+'px';lot.style.left=o+'px';lot.style.top=o+'px'}
+ const lot=$('.lot'),nav=$('.nav'),W2=Math.min(2,COLS),LW=W2*TW+(W2-1)*GAP;if(lot){lot.style.width=LW+'px';lot.style.left=o+'px';lot.style.top=o+'px'}
  let y=o+(lot?lot.offsetHeight+(pm?14:30):0)+(nav?nav.offsetHeight+10:0),h=0;
  let k=0;S.tables.forEach(t=>{const e=$(`.tbl[data-t="${t.id}"]`);if(!e)return;const c=k++%COLS;if(c==0&&k>1){y+=h+VG;h=0}
   t.x=o+c*(TW+GAP);t.y=y;e.style.left=t.x+'px';e.style.top=y+'px';h=Math.max(h,e.offsetHeight)});
@@ -206,10 +218,10 @@ document.addEventListener('change',e=>{const a=e.target.closest('input[data-a]')
 // trascinamento nomi
 let over=null;const clr=()=>{over&&over.classList.remove('over');over=null};
 document.addEventListener('dragstart',e=>{const g=e.target.closest('[data-g]'),s=e.target.closest('.seat.full');
- const v=g?'g:'+g.dataset.g:s?'s:'+s.dataset.s:null;if(!v)return e.preventDefault();e.dataTransfer.setData('text/plain',v);e.dataTransfer.effectAllowed='move'});
-document.addEventListener('dragover',e=>{const s=e.target.closest('.seat'),side=e.target.closest('aside');if(s||side){e.preventDefault();clr();if(s){s.classList.add('over');over=s}}});
+ const v=g?'g:'+g.dataset.g:s?((msel.length>1&&msel.includes(s.dataset.s)?'b:':'s:')+s.dataset.s):null;if(!v)return e.preventDefault();e.dataTransfer.setData('text/plain',v);e.dataTransfer.effectAllowed='move';if(v[0]=='b'){dragBlock=s.dataset.s;ghost(e)}});
+document.addEventListener('dragover',e=>{const s=e.target.closest('.seat'),side=e.target.closest('aside');if(s||side){e.preventDefault();clr();if(s){s.classList.add('over');over=s;if(dragBlock)previewBlock(s.dataset.s)}else if(dragBlock)previewBlock(null)}});
 document.addEventListener('drop',e=>{const d=e.dataTransfer.getData('text/plain');if(!d)return;const s=e.target.closest('.seat'),side=e.target.closest('aside');clr();
- if(!s&&!side)return;e.preventDefault();push();const k=d[0],v=d.slice(2);
+ if(!s&&!side)return;e.preventDefault();if(d[0]=='b'){if(s)moveBlock(d.slice(2),s.dataset.s);return}push();const k=d[0],v=d.slice(2);
  if(side&&!s){if(k=='s')delete S.seats[v]}
  else if(k=='g'){for(const z in S.seats)if(S.seats[z]==v)delete S.seats[z];S.seats[s.dataset.s]=v}
  else{const to=s.dataset.s;if(v==to)return;const a=S.seats[to],b=S.seats[v];if(a)S.seats[v]=a;else delete S.seats[v];S.seats[to]=b}
@@ -295,15 +307,74 @@ const place=(to,d)=>{push();const k=d[0],v=d.slice(2);
  else{if(v==to)return;const a=S.seats[to],b=S.seats[v];if(a)S.seats[v]=a;else delete S.seats[v];S.seats[to]=b}
  save();render()};
 document.addEventListener('click',e=>{
- if(e.target.closest('[data-x]'))return;
+ if(mqj||e.target.closest('[data-x]'))return;
  const tl=e.target.closest('[data-tile]');if(tl){mview=tl.dataset.tile;render();$('main').scrollTop=0;return}
  const nv=e.target.closest('[data-nav]');if(nv){const i=S.tables.findIndex(t=>t.id==mview),d=nv.dataset.nav;mview=d=='ov'?null:((S.tables[i+(d=='next'?1:-1)]||{}).id||mview);render();$('main').scrollTop=0;return}
  const g=e.target.closest('.g[data-g]'),z=e.target.closest('.seat');
  if(g){const id=g.dataset.g;sel=sel&&sel.t=='g'&&sel.id==id?null:{t:'g',id};return render()}
  if(z){const id=z.dataset.s;
+  if(multi||e.ctrlKey||e.metaKey||e.shiftKey){
+   if(e.shiftKey&&anchor&&anchor.split('-')[0]==id.split('-')[0]){const O=ord(S.tables.find(x=>x.id==id.split('-')[0])),a=O.indexOf(anchor),b=O.indexOf(id),r=O.slice(Math.min(a,b),Math.max(a,b)+1).filter(z=>S.seats[z]);
+    msel=(e.ctrlKey||e.metaKey)?[...new Set([...msel,...r])]:r}
+   else{if(S.seats[id])msel=msel.includes(id)?msel.filter(x=>x!=id):[...msel,id];anchor=id}
+   sel=null;return render()}
+  if(msel.length)msel=[];
   if(sel){const d=sel.t+':'+sel.id;sel=null;if(d=='s:'+id)return render();return place(id,d)}
   if(S.seats[id])sel={t:'s',id};return render()}
- if(sel&&!e.target.closest('button,input,select,label,dialog,#toast')){sel=null;render()}});
+ if((sel||(msel.length&&!multi))&&!e.target.closest('button,input,select,label,dialog,#toast,#mbar')){sel=null;if(!multi)msel=[];render()}});
+// sposta in blocco i nomi selezionati di un tavolo: ogni nome avanza dello stesso numero di posti; chi occupava i posti di arrivo prende quelli lasciati liberi
+function blockPlan(grab,target,shift){
+ const tA=S.tables.find(x=>x.id==grab.split('-')[0]);
+ if(!tA||msel.some(z=>z.split('-')[0]!=tA.id))return{err:'Per spostare insieme i nomi, selezionali nello stesso tavolo.'};
+ const tB=target?S.tables.find(x=>x.id==target.split('-')[0]):tA;if(!tB)return{noop:true};
+ const OA=ord(tA),OB=ord(tB),cross=tB!==tA,src=msel.map(z=>OA.indexOf(z)).filter(i=>i>=0).sort((a,b)=>a-b),
+  d=shift!==undefined?shift:OB.indexOf(target)-OA.indexOf(grab),dst=src.map(i=>i+d);
+ if(!cross&&!d)return{noop:true};
+ if(dst.some(i=>i<0||i>=OB.length))return{err:'Non c’è abbastanza spazio in quella direzione.'};
+ return{tA,tB,OA,OB,src,dst,cross,dstSeats:dst.map(j=>OB[j])}}
+// sposta in blocco: ogni nome avanza dello stesso numero di posti; chi occupava i posti di arrivo prende quelli lasciati liberi
+function moveBlock(grab,target,shift){
+ const r=blockPlan(grab,target,shift);if(r.noop)return;if(r.err)return toast(r.err);
+ const{tA,tB,OA,OB,src,dst,cross}=r,moved=src.map(i=>S.seats[OA[i]]);
+ if(cross){const disp=dst.map(j=>S.seats[OB[j]]),nm=names(),n1=S.tables.indexOf(tA)+1,n2=S.tables.indexOf(tB)+1,ch=disp.filter(Boolean);
+  if(!confirm(`Spostare ${src.length} ${src.length==1?'nome':'nomi'} dal tavolo ${n1} al tavolo ${n2}?`+(ch.length?`\n\nChi occupa ora quei posti (${ch.map(id=>nm[id]).join(', ')}) passerà ai posti lasciati liberi nel tavolo ${n1}.`:'')))return;
+  push();src.forEach((i,k)=>{S.seats[OB[dst[k]]]=moved[k];if(disp[k])S.seats[OA[i]]=disp[k];else delete S.seats[OA[i]]});
+  msel=dst.map(j=>OB[j]);save();render();return}
+ const sS=new Set(src),dS=new Set(dst),to=dst.filter(j=>!sS.has(j)),from=src.filter(i=>!dS.has(i)),disp=to.map(j=>S.seats[OA[j]]);
+ push();
+ from.forEach(i=>delete S.seats[OA[i]]);
+ src.forEach((i,k)=>{S.seats[OA[dst[k]]]=moved[k]});
+ from.forEach((i,k)=>{if(disp[k])S.seats[OA[i]]=disp[k]});
+ msel=dst.map(j=>OA[j]);save();render()}
+// mentre si trascina: l'ombra mostra tutti i nomi del blocco e i posti di arrivo si evidenziano
+function ghost(e){const els=msel.map(z=>$(`.seat[data-s="${z}"]`)).filter(Boolean),rs=els.map(x=>x.getBoundingClientRect());if(!els.length)return;
+ const L=Math.min(...rs.map(r=>r.left)),T=Math.min(...rs.map(r=>r.top)),g=document.createElement('div');
+ g.style.cssText='position:fixed;left:-9999px;top:0;pointer-events:none';
+ els.forEach((x,i)=>{const c=x.cloneNode(true);c.querySelectorAll('.x').forEach(q=>q.remove());c.removeAttribute('draggable');
+  c.style.cssText=`position:absolute;left:${rs[i].left-L}px;top:${rs[i].top-T}px;width:${rs[i].width}px;height:${rs[i].height}px;margin:0;background:#F0BC0F;outline:2px solid #EF7135`;g.append(c)});
+ document.body.append(g);e.dataTransfer.setDragImage(g,e.clientX-L,e.clientY-T);
+ setTimeout(()=>{g.remove();els.forEach(x=>x.classList.add('lift'))},0)}
+function previewBlock(target){if(target===lastPrev)return;lastPrev=target;
+ $$('.seat.dst,.seat.dstbad').forEach(x=>x.classList.remove('dst','dstbad'));if(!target||!dragBlock)return;
+ const r=blockPlan(dragBlock,target),mark=(z,c)=>{const x=$(`.seat[data-s="${z}"]`);x&&x.classList.add(c)};
+ if(r.err)mark(target,'dstbad');else if(!r.noop)r.dstSeats.forEach(z=>mark(z,'dst'))}
+document.addEventListener('dragend',()=>{dragBlock=null;lastPrev=null;$$('.seat.dst,.seat.dstbad,.seat.lift').forEach(x=>x.classList.remove('dst','dstbad','lift'))});
+const stepBlock=dir=>{if(!msel.length)return;moveBlock(msel[0],null,(msel[0].includes('-R')?-1:1)*(dir=='down'?1:-1))};
+$('#mUp').onclick=()=>stepBlock('up');$('#mDn').onclick=()=>stepBlock('down');
+$('#mClr').onclick=()=>{msel=[];render()};
+$('#bMulti').onclick=()=>{multi=!multi;if(!multi)msel=[];sel=null;render()};
+addEventListener('keydown',e=>{if(e.key=='Escape'&&(sel||msel.length)){sel=null;msel=[];render()}});
+let mq=null;
+document.addEventListener('pointerdown',e=>{
+ if(e.pointerType!='mouse'||e.button!==0||view!='plan'||!e.target.closest('#stage')||e.target.closest('.seat,button,label,input,select,.tile,.nav'))return;
+ mq={x:e.clientX,y:e.clientY,add:e.ctrlKey||e.metaKey||e.shiftKey,box:null,r:null}});
+document.addEventListener('pointermove',e=>{if(!mq)return;const dx=e.clientX-mq.x,dy=e.clientY-mq.y;
+ if(!mq.box){if(Math.abs(dx)+Math.abs(dy)<6)return;mq.box=document.createElement('div');mq.box.id='mq';document.body.append(mq.box)}
+ const r=mq.r={x:Math.min(mq.x,e.clientX),y:Math.min(mq.y,e.clientY),w:Math.abs(dx),h:Math.abs(dy)};
+ Object.assign(mq.box.style,{left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'})});
+document.addEventListener('pointerup',()=>{if(!mq)return;const q=mq;mq=null;if(!q.box)return;q.box.remove();const r=q.r;
+ const hit=$$('.seat.full').filter(z=>{const b=z.getBoundingClientRect();return b.left<r.x+r.w&&b.right>r.x&&b.top<r.y+r.h&&b.bottom>r.y}).map(z=>z.dataset.s);
+ msel=q.add?[...new Set([...msel,...hit])]:hit;sel=null;anchor=null;mqj=true;setTimeout(()=>mqj=false,0);render()});
 let rz;addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(render,250)});
 planMsg('');render();if(SYNC){pullPlan(true).then(()=>{doSync(true);if(dirty)schedRemote()})}
 </script></body></html>
